@@ -1,0 +1,103 @@
+version: "3.7"
+
+services:
+  caddy:
+    image: caddy
+    depends_on:
+      - api
+      - frontend
+    environment:
+      PWA_UPSTREAM: frontend:3000
+      SERVER_NAME: ${SERVER_NAME:-localhost, caddy:80}
+      DEBUG: debug
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - public:/srv/api/public
+      - php_socket:/var/run/php
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      # HTTP
+      - target: 80
+        published: ${HTTP_PORT:-80}
+        protocol: tcp
+      # HTTPS
+      - target: 443
+        published: ${HTTPS_PORT:-443}
+        protocol: tcp
+
+  api:
+    image: contentlense/api:main
+    depends_on:
+      - database
+    restart: unless-stopped
+    volumes:
+      - public:/srv/api/public
+      - php_socket:/var/run/php
+    healthcheck:
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    environment:
+      APP_ENV: prod
+      APP_SECRET: ${APP_SECRET}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-api-platform}:${POSTGRES_PASSWORD:-!ChangeMe!}@database:5432/${POSTGRES_DB:-api}?serverVersion=${POSTGRES_VERSION:-14}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+      TRUSTED_HOSTS: ^${SERVER_NAME:-example\.com|localhost}|caddy$$
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      
+  frontend:
+    image: contentlense/frontend:main
+    environment:
+      API_PLATFORM_CLIENT_GENERATOR_ENTRYPOINT: http://caddy
+      NEXT_PUBLIC_ENTRYPOINT: http://caddy
+
+  mention:
+    image: contentlense/mention-api:main
+    ports: 
+      - "5000:5000"
+    profiles:
+      - donotstart
+
+  textcomplexity:
+    image: contentlense/text-complexity-api:main
+    ports: 
+      - "5001:5001"
+    profiles:
+      - donotstart
+
+  topics:
+    image: contentlense/topic-detection-api:main
+    ports: 
+      - "5002:5002"
+    profiles:
+      - donotstart
+
+  sentiment:
+    image: contentlense/sentiment-api:main
+    ports: 
+      - "5003:5003"
+    profiles:
+      - donotstart
+  
+  database:
+    restart: unless-stopped
+    image: postgres:${POSTGRES_VERSION:-14}-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-api}
+      # You should definitely change the password in production
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-!ChangeMe!}
+      - POSTGRES_USER=${POSTGRES_USER:-api-platform}
+    volumes:
+      - db_data:/var/lib/postgresql/data:rw
+
+
+volumes:
+  public:
+  php_socket:
+  caddy_data:
+  caddy_config:
+  db_data:
